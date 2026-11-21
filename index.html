@@ -139,9 +139,14 @@
   .search-row .text-input { margin-bottom: 8px; }
   .search-go { flex: 0 0 48px; height: 44px; border: none; border-radius: 12px; background: var(--ink); color: #fff; font-size: 18px; }
   .results { border: 1px solid var(--line); border-radius: 12px; background: #fff; margin-bottom: 12px; max-height: 280px; overflow-y: auto; }
-  .result { display: block; width: 100%; text-align: left; background: none; border: none; border-top: 1px solid var(--line); padding: 10px 12px; font-size: 14px; color: var(--ink); }
+  .result { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: none; border: none; border-top: 1px solid var(--line); padding: 10px 12px; font-size: 14px; color: var(--ink); }
   .result:first-child { border-top: none; }
   .result small { display: block; color: var(--muted); }
+  .thumb { flex: 0 0 48px; width: 48px; height: 48px; object-fit: contain; background: #fff; border-radius: 8px; border: 1px solid var(--line); }
+  .thumb.big { flex-basis: 56px; width: 56px; height: 56px; }
+  .none { display: inline-flex; align-items: center; justify-content: center; font-size: 22px; background: var(--bg); }
+  .mini { width: 20px; height: 20px; object-fit: contain; border-radius: 4px; vertical-align: middle; margin-right: 5px; font-size: 13px; background: none; border: none; }
+  .recent-chips button { display: inline-flex; align-items: center; }
   .result:active { background: var(--accent-soft); }
   .search-msg { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
   .recent-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
@@ -223,7 +228,7 @@
   </section>
 
   <footer>Your data is saved in this browser only.<br>
-    Product names from <a href="https://world.openfoodfacts.org" style="color:inherit">Open Food Facts</a> (Open Database License).</footer>
+    Product names and photos from <a href="https://world.openfoodfacts.org" style="color:inherit">Open Food Facts</a> (Open Database License, photos CC BY-SA).</footer>
 </div>
 
 <!-- Settings panel (slides up from the bottom) -->
@@ -750,7 +755,7 @@ function parseReceipt(text) {
    only search when you tap 🔍, and remember the results.
    ========================================================= */
 const OFF_URL = "https://world.openfoodfacts.org/cgi/search.pl";
-const OFF_FIELDS = "code,product_name,product_name_nl,product_name_fr,product_name_en,brands,quantity,categories_tags";
+const OFF_FIELDS = "code,product_name,product_name_nl,product_name_fr,product_name_en,brands,quantity,categories_tags,image_front_small_url,image_small_url";
 const searchCache = new Map();   // query → results, so the same search costs nothing
 let searchTimes = [];            // when we searched, to stay under the limit
 let pickedProduct = null;        // the product you tapped
@@ -764,6 +769,17 @@ function buildSearchUrl(query, belgiumOnly) {
   return OFF_URL + "?" + p.toString();
 }
 
+// only accept photo links that really come from Open Food Facts
+function safeImage(url) {
+  return /^https:\/\/([a-z0-9-]+\.)*openfoodfacts\.org\/[^"'<>\s]+$/i.test(url || "") ? url : "";
+}
+// a product photo, or a plain placeholder if there is none (or it fails to load)
+function productImg(p, cls = "thumb") {
+  return p.image
+    ? `<img class="${cls}" src="${p.image}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'${cls} none',textContent:'📦'}))">`
+    : `<span class="${cls} none">📦</span>`;
+}
+
 // turns Open Food Facts data into simple products for our app
 function cleanProducts(list) {
   const lang = { nld: "product_name_nl", fra: "product_name_fr", eng: "product_name_en" }[state.ocrLang] || "product_name_nl";
@@ -773,6 +789,7 @@ function cleanProducts(list) {
     brand: (p.brands || "").split(",")[0].trim(),
     quantity: (p.quantity || "").trim(),
     code: p.code || "",
+    image: safeImage(p.image_front_small_url || p.image_small_url),
     snack: (p.categories_tags || []).some(t => /^en:(snacks|sweet-snacks|salty-snacks|chocolates|biscuits|crisps|chips|confectioneries|candies)$/.test(t)),
   }))
   .filter(p => p.name)
@@ -848,8 +865,8 @@ document.getElementById("addForm").addEventListener("submit", e => {
   };
   // if you picked a product, remember it (so tips and "recent products" can use it)
   if (pickedProduct) {
-    const { name, brand, quantity, code } = pickedProduct;
-    entry.items = [{ name, brand, quantity, code, price: amount }];
+    const { name, brand, quantity, code, image } = pickedProduct;
+    entry.items = [{ name, brand, quantity, code, image, price: amount }];
     if (!entry.note) entry.note = name;
   }
   state.entries.push(entry);
@@ -990,8 +1007,8 @@ function showResults(list, message) {
   if (!list.length) { box.innerHTML = `<p class="search-msg">No products found. Try another word, or just type a note below.</p>`; return; }
   box.innerHTML = `<div class="results">
     ${list.map((p, i) => `<button type="button" class="result" data-i="${i}">
-      ${escapeHtml(p.name)}<small>${escapeHtml(productLabel(p)) || "&nbsp;"}</small></button>`).join("")}
-    <div class="credit">Data from <a href="https://world.openfoodfacts.org">Open Food Facts</a> (ODbL)</div>
+      ${productImg(p)}<span>${escapeHtml(p.name)}<small>${escapeHtml(productLabel(p)) || "&nbsp;"}</small></span></button>`).join("")}
+    <div class="credit">Data and photos from <a href="https://world.openfoodfacts.org">Open Food Facts</a> (ODbL, photos CC BY-SA)</div>
   </div>`;
 }
 
@@ -999,14 +1016,14 @@ function showRecent() {
   const list = recentProducts();
   shownResults = list;
   $("productResults").innerHTML = list.length && !pickedProduct
-    ? `<div class="recent-chips">${list.map((p, i) => `<button type="button" class="result-chip" data-i="${i}">${escapeHtml(p.name)}</button>`).join("")}</div>`
+    ? `<div class="recent-chips">${list.map((p, i) => `<button type="button" class="result-chip" data-i="${i}">${productImg(p, "mini")}${escapeHtml(p.name)}</button>`).join("")}</div>`
     : "";
 }
 
 function pickProduct(p) {
   pickedProduct = p;
   $("selectedProduct").innerHTML = p
-    ? `<div class="picked"><div><b>${escapeHtml(p.name)}</b><small>${escapeHtml(productLabel(p))}</small></div>
+    ? `<div class="picked">${productImg(p, "thumb big")}<div><b>${escapeHtml(p.name)}</b><small>${escapeHtml(productLabel(p))}</small></div>
        <button type="button" id="unpick" aria-label="Remove product">×</button></div>`
     : "";
   if (p) {

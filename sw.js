@@ -4,7 +4,7 @@
    files on your phone. Change CACHE_NAME (v1 → v2) whenever
    you change an icon, so phones pick up the new version.
    ========================================================= */
-const CACHE_NAME = "budgetbite-v2";
+const CACHE_NAME = "budgetbite-v3";
 const APP_FILES = [
   "./",
   "./index.html",
@@ -36,6 +36,7 @@ self.addEventListener("activate", event => {
 self.addEventListener("fetch", event => {
   const req = event.request;
   if (req.method !== "GET") return;
+  if (req.url.includes("openfoodfacts.org")) return;   // product searches always go to the internet
 
   if (req.mode === "navigate") {
     event.respondWith(

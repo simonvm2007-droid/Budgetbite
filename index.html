@@ -133,6 +133,25 @@
   .swap .to { color: var(--accent); }
   .swap-total { background: var(--accent-soft); border-radius: 12px; padding: 10px 12px; font-size: 14px; margin-bottom: 8px; }
   .fine { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+
+  /* ---------- 9. PRODUCT SEARCH ---------- */
+  .search-row { display: flex; gap: 8px; }
+  .search-row .text-input { margin-bottom: 8px; }
+  .search-go { flex: 0 0 48px; height: 44px; border: none; border-radius: 12px; background: var(--ink); color: #fff; font-size: 18px; }
+  .results { border: 1px solid var(--line); border-radius: 12px; background: #fff; margin-bottom: 12px; max-height: 280px; overflow-y: auto; }
+  .result { display: block; width: 100%; text-align: left; background: none; border: none; border-top: 1px solid var(--line); padding: 10px 12px; font-size: 14px; color: var(--ink); }
+  .result:first-child { border-top: none; }
+  .result small { display: block; color: var(--muted); }
+  .result:active { background: var(--accent-soft); }
+  .search-msg { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
+  .recent-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .recent-chips button { border: 1px solid var(--line); background: #fff; border-radius: 99px; padding: 6px 11px; font-size: 13px; color: var(--ink); }
+  .picked { display: flex; align-items: center; gap: 10px; background: var(--accent-soft); border: 1px solid #cfe5d8; border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; font-size: 14px; }
+  .picked div { flex: 1; }
+  .picked small { display: block; color: var(--muted); }
+  .picked button { border: none; background: none; font-size: 18px; color: var(--muted); }
+  .credit { font-size: 11px; color: var(--muted); padding: 6px 12px; border-top: 1px solid var(--line); }
+  .credit a { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -161,6 +180,13 @@
     <input type="file" id="receiptFile" accept="image/*" hidden>
     <p class="or">or add it by hand</p>
     <form id="addForm">
+      <label class="field-label" for="productSearch">What did you buy? (optional)</label>
+      <div class="search-row">
+        <input class="text-input" id="productSearch" type="search" placeholder="Search a product, e.g. nutella" autocomplete="off" enterkeyhint="search">
+        <button type="button" class="search-go" id="productSearchBtn" aria-label="Search">🔍</button>
+      </div>
+      <div id="productResults"></div>
+      <div id="selectedProduct"></div>
       <div class="amount-row">
         <span>€</span>
         <input id="amount" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off">
@@ -196,7 +222,8 @@
     <div id="recent"></div>
   </section>
 
-  <footer>Your data is saved in this browser only.</footer>
+  <footer>Your data is saved in this browser only.<br>
+    Product names from <a href="https://world.openfoodfacts.org" style="color:inherit">Open Food Facts</a> (Open Database License).</footer>
 </div>
 
 <!-- Settings panel (slides up from the bottom) -->
@@ -365,7 +392,7 @@ function render() {
         const when = new Date(e.time).toLocaleString("en-GB", { weekday: "short", hour: "2-digit", minute: "2-digit" });
         return `<div class="entry">
           <span class="emoji">${c.emoji}</span>
-          <div class="info">${escapeHtml(e.note || c.label)}${e.items && e.items.length ? `<span class="badge">🧾 ${e.items.length} items</span>` : ""}<small>${when}</small></div>
+          <div class="info">${escapeHtml(e.note || c.label)}${e.receipt ? `<span class="badge">🧾 ${e.items.length} items</span>` : ""}<small>${when}</small></div>
           <span class="price">${euro(e.amount)}</span>
           <button class="del" data-id="${e.id}" aria-label="Delete">×</button>
         </div>`;
@@ -519,7 +546,7 @@ function addDemoData() {
     { name: "PRINGLES ORIGINAL", price: 2.49 }, { name: "BARILLA SPAGHETTI", price: 1.89 },
     { name: "MELK HALFVOL", price: 1.09 }, { name: "BANANEN", price: 1.79 }, { name: "KIPFILET", price: 4.50 },
   ];
-  state.entries.push({ id: "demoR" + now.toString(36), category: "groceries", note: "Colruyt", items,
+  state.entries.push({ id: "demoR" + now.toString(36), category: "groceries", note: "Colruyt", items, receipt: true,
     amount: Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100, time: now - 5 * day });
   save();
   render();
@@ -601,7 +628,7 @@ function getSwaps() {
     // scanned receipts have products; hand-added purchases only have a note
     const products = e.items && e.items.length ? e.items : [{ name: e.note || "", price: e.amount }];
     products.forEach(p => {
-      const swap = findSwap(p.name);
+      const swap = findSwap(p.name + " " + (p.brand || ""));
       if (!swap || p.price <= 0) return;
       const key = swap[1];
       const g = found.get(key) || { alternative: swap[1], pct: swap[2], names: new Set(), count: 0, spent: 0 };
@@ -717,6 +744,85 @@ function parseReceipt(text) {
 }
 
 /* =========================================================
+   5e. PRODUCT SEARCH – Open Food Facts
+   A free, open database of food products (no prices).
+   Their rule: max 10 searches per minute per user, so we
+   only search when you tap 🔍, and remember the results.
+   ========================================================= */
+const OFF_URL = "https://world.openfoodfacts.org/cgi/search.pl";
+const OFF_FIELDS = "code,product_name,product_name_nl,product_name_fr,product_name_en,brands,quantity,categories_tags";
+const searchCache = new Map();   // query → results, so the same search costs nothing
+let searchTimes = [];            // when we searched, to stay under the limit
+let pickedProduct = null;        // the product you tapped
+
+function buildSearchUrl(query, belgiumOnly) {
+  const p = new URLSearchParams({
+    search_terms: query, search_simple: "1", action: "process", json: "1",
+    page_size: "15", sort_by: "unique_scans_n", fields: OFF_FIELDS,
+  });
+  if (belgiumOnly) { p.set("tagtype_0", "countries"); p.set("tag_contains_0", "contains"); p.set("tag_0", "belgium"); }
+  return OFF_URL + "?" + p.toString();
+}
+
+// turns Open Food Facts data into simple products for our app
+function cleanProducts(list) {
+  const lang = { nld: "product_name_nl", fra: "product_name_fr", eng: "product_name_en" }[state.ocrLang] || "product_name_nl";
+  const seen = new Set();
+  return (list || []).map(p => ({
+    name: (p[lang] || p.product_name || p.product_name_nl || p.product_name_fr || "").trim(),
+    brand: (p.brands || "").split(",")[0].trim(),
+    quantity: (p.quantity || "").trim(),
+    code: p.code || "",
+    snack: (p.categories_tags || []).some(t => /^en:(snacks|sweet-snacks|salty-snacks|chocolates|biscuits|crisps|chips|confectioneries|candies)$/.test(t)),
+  }))
+  .filter(p => p.name)
+  .filter(p => { const k = normalize(p.name + p.brand + p.quantity); if (seen.has(k)) return false; seen.add(k); return true; });
+}
+
+async function searchProducts(query) {
+  query = query.trim();
+  if (query.length < 2) throw new Error("Type at least 2 letters.");
+  const key = normalize(query);
+  if (searchCache.has(key)) return searchCache.get(key);
+
+  // stay under 10 searches per minute (we use 8 to be safe)
+  const now = Date.now();
+  searchTimes = searchTimes.filter(t => now - t < 60000);
+  if (searchTimes.length >= 8) {
+    const wait = Math.ceil((60000 - (now - searchTimes[0])) / 1000);
+    throw new Error(`Searching is limited to a few times per minute. Try again in ${wait} seconds, or pick a recent product.`);
+  }
+
+  const get = async belgiumOnly => {
+    searchTimes.push(Date.now());
+    const res = await fetch(buildSearchUrl(query, belgiumOnly));
+    if (res.status === 429) throw new Error("Too many searches. Wait a minute and try again.");
+    if (!res.ok) throw new Error("The product database didn't answer. Try again later.");
+    return cleanProducts((await res.json()).products);
+  };
+
+  let results = await get(true);                         // Belgian products first
+  if (!results.length) results = await get(false);       // nothing? search the whole world
+  searchCache.set(key, results);
+  return results;
+}
+
+// products you picked before – instant, and they work offline
+function recentProducts() {
+  const seen = new Set(), list = [];
+  [...state.entries].sort((a, b) => b.time - a.time).forEach(e => (e.items || []).forEach(i => {
+    if (!i.code) return;                                 // only products picked from the search
+    const k = i.code + i.name;
+    if (!seen.has(k) && list.length < 8) { seen.add(k); list.push(i); }
+  }));
+  return list;
+}
+
+function productLabel(p) {
+  return [p.brand, p.quantity].filter(Boolean).join(" · ");
+}
+
+/* =========================================================
    6. BUTTONS & EVENTS
    ========================================================= */
 document.getElementById("chips").addEventListener("click", e => {
@@ -733,16 +839,24 @@ document.getElementById("addForm").addEventListener("submit", e => {
   if (amount === null || amount <= 0) { error.textContent = "Enter an amount, e.g. 3.50"; return; }
   error.textContent = "";
 
-  state.entries.push({
+  const entry = {
     id: Date.now().toString(36),
     amount,
     category: selectedCategory,
     note: document.getElementById("note").value.trim(),
     time: Date.now(),
-  });
+  };
+  // if you picked a product, remember it (so tips and "recent products" can use it)
+  if (pickedProduct) {
+    const { name, brand, quantity, code } = pickedProduct;
+    entry.items = [{ name, brand, quantity, code, price: amount }];
+    if (!entry.note) entry.note = name;
+  }
+  state.entries.push(entry);
   save();
   document.getElementById("amount").value = "";
   document.getElementById("note").value = "";
+  pickProduct(null);
   render();
 });
 
@@ -856,6 +970,7 @@ $("scanSave").addEventListener("click", () => {
     amount,
     category: $("scanCategory").value,
     note: $("scanStore").value.trim() || "Receipt",
+    receipt: true,
     items: items.map(i => ({ name: i.name || "Product", price: i.price })),
     time: Date.now(),
   });
@@ -864,6 +979,70 @@ $("scanSave").addEventListener("click", () => {
   scanOverlay.classList.remove("open");
 });
 scanOverlay.addEventListener("click", e => { if (e.target === scanOverlay) { scanCancelled = true; scanOverlay.classList.remove("open"); } });
+
+/* ---- Product search ---- */
+let shownResults = [];
+
+function showResults(list, message) {
+  shownResults = list;
+  const box = $("productResults");
+  if (message) { box.innerHTML = `<p class="search-msg">${escapeHtml(message)}</p>`; return; }
+  if (!list.length) { box.innerHTML = `<p class="search-msg">No products found. Try another word, or just type a note below.</p>`; return; }
+  box.innerHTML = `<div class="results">
+    ${list.map((p, i) => `<button type="button" class="result" data-i="${i}">
+      ${escapeHtml(p.name)}<small>${escapeHtml(productLabel(p)) || "&nbsp;"}</small></button>`).join("")}
+    <div class="credit">Data from <a href="https://world.openfoodfacts.org">Open Food Facts</a> (ODbL)</div>
+  </div>`;
+}
+
+function showRecent() {
+  const list = recentProducts();
+  shownResults = list;
+  $("productResults").innerHTML = list.length && !pickedProduct
+    ? `<div class="recent-chips">${list.map((p, i) => `<button type="button" class="result-chip" data-i="${i}">${escapeHtml(p.name)}</button>`).join("")}</div>`
+    : "";
+}
+
+function pickProduct(p) {
+  pickedProduct = p;
+  $("selectedProduct").innerHTML = p
+    ? `<div class="picked"><div><b>${escapeHtml(p.name)}</b><small>${escapeHtml(productLabel(p))}</small></div>
+       <button type="button" id="unpick" aria-label="Remove product">×</button></div>`
+    : "";
+  if (p) {
+    $("productSearch").value = "";
+    $("productResults").innerHTML = "";
+    selectedCategory = p.snack ? "snacks" : "groceries";   // a guess – you can still tap another category
+    renderChips();
+    $("amount").focus();
+  } else {
+    showRecent();
+  }
+}
+
+async function runSearch() {
+  const q = $("productSearch").value;
+  if (!q.trim()) { showRecent(); return; }
+  showResults([], "Searching…");
+  try {
+    showResults(await searchProducts(q));
+  } catch (err) {
+    showResults([], navigator.onLine === false
+      ? "You're offline. Pick a recent product, or type a note below."
+      : (err.message && !err.message.includes("fetch") ? err.message : "Couldn't reach the product database. Check your internet."));
+  }
+}
+
+$("productSearchBtn").addEventListener("click", runSearch);
+$("productSearch").addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); runSearch(); }   // don't submit the whole form
+});
+$("productSearch").addEventListener("input", e => { if (!e.target.value) showRecent(); });
+$("productResults").addEventListener("click", e => {
+  const btn = e.target.closest("[data-i]");
+  if (btn) pickProduct(shownResults[+btn.dataset.i]);
+});
+$("selectedProduct").addEventListener("click", e => { if (e.target.id === "unpick") pickProduct(null); });
 
 document.getElementById("tips").addEventListener("click", e => {
   if (e.target.id === "demoBtn") addDemoData();
@@ -902,6 +1081,7 @@ clearBtn.addEventListener("click", () => {
 load();
 renderChips();
 render();
+showRecent();
 
 /* =========================================================
    8. OFFLINE SUPPORT – start the service worker (sw.js)

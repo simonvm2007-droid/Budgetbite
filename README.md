@@ -1,6 +1,6 @@
 # 🍔 BudgetBite – a spending coach for students
 
-**Live app:** https://YOUR-USERNAME.github.io/budgetbite
+**Live app:** https://simonvm2007-droid.github.io/Budgetbite/
 
 BudgetBite helps students spend less on food and drinks. You log what you buy in a few taps, and the app shows how much you can still spend today and gives personal tips to save money.
 

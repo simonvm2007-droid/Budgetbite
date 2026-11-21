@@ -134,6 +134,20 @@
   .swap-total { background: var(--accent-soft); border-radius: 12px; padding: 10px 12px; font-size: 14px; margin-bottom: 8px; }
   .fine { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
 
+  /* ---------- 10. ACCOUNTS ---------- */
+  .auth { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: calc(24px + env(safe-area-inset-top)) 20px 24px; overflow-y: auto; }
+  .auth[hidden] { display: none; }
+  .auth-box { width: 100%; max-width: 380px; }
+  .auth-box h1 { font-size: 40px; text-align: center; margin-bottom: 6px; }
+  .auth-box .hint { text-align: center; margin-bottom: 22px; font-size: 15px; }
+  .auth-box .link { display: block; margin: 14px auto 0; }
+  .auth-ok { color: var(--accent); font-size: 13px; min-height: 18px; margin: -4px 0 6px; }
+  .account-row { background: var(--bg); border-radius: 12px; padding: 12px; font-size: 14px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .account-row div { flex: 1; }
+  .account-row small { display: block; color: var(--muted); }
+  .account-row button { border: 1px solid var(--line); background: #fff; border-radius: 99px; padding: 7px 12px; font-weight: 700; color: var(--ink); font-size: 13px; }
+  .sync { font-size: 12px; color: var(--muted); }
+
   /* ---------- 9. PRODUCT SEARCH ---------- */
   .search-row { display: flex; gap: 8px; }
   .search-row .text-input { margin-bottom: 8px; }
@@ -227,13 +241,14 @@
     <div id="recent"></div>
   </section>
 
-  <footer>BudgetBite v1.5 · Your data is saved in this browser only.<br>
+  <footer>BudgetBite v1.6 · Your data is saved in this browser only.<br>
     Product names and photos from <a href="https://world.openfoodfacts.org" style="color:inherit">Open Food Facts</a> (Open Database License, photos CC BY-SA).</footer>
 </div>
 
 <!-- Settings panel (slides up from the bottom) -->
 <div class="overlay" id="overlay">
   <div class="sheet">
+    <div id="accountRow"></div>
     <h2>Weekly budget for food &amp; drinks</h2>
     <input id="budgetInput" type="text" inputmode="decimal">
     <label class="field-label" for="langSelect">Language of your receipts</label>
@@ -244,6 +259,24 @@
     </select>
     <button class="primary" id="saveBudget">Save</button>
     <button class="danger" id="clearData">Delete all purchases</button>
+  </div>
+</div>
+
+<!-- Log in / create account screen -->
+<div class="auth" id="authScreen" hidden>
+  <div class="auth-box">
+    <h1>Budget<span>Bite</span></h1>
+    <p class="hint">Log in to keep your purchases in sync on all your devices.</p>
+    <form id="authForm">
+      <input class="text-input" id="authEmail" type="email" autocomplete="email" placeholder="Email">
+      <input class="text-input" id="authPassword" type="password" autocomplete="current-password" placeholder="Password (at least 6 characters)">
+      <div class="error" id="authError"></div>
+      <div class="auth-ok" id="authOk"></div>
+      <button class="primary" type="submit">Log in</button>
+      <button class="secondary" type="button" id="signupBtn">Create account</button>
+    </form>
+    <button class="link" type="button" id="forgotBtn">Forgot password?</button>
+    <button class="link" type="button" id="guestBtn">Try without an account (data stays on this device)</button>
   </div>
 </div>
 
@@ -295,6 +328,28 @@ const CATEGORIES = [
    try/catch because some browsers block it.
    ========================================================= */
 const STORAGE_KEY = "budgetbite-v1";
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+/* =========================================================
+   ACCOUNTS (Firebase) – paste your Firebase config below.
+   Leave it as null and the app works without accounts.
+   See SETUP.md for the steps. The config is not a secret:
+   your data is protected by the security rules in Firebase.
+   ========================================================= */
+const FIREBASE_CONFIG = null;
+/* example of what to paste:
+const FIREBASE_CONFIG = {
+  apiKey: "AIza...",
+  authDomain: "budgetbite-xxxx.firebaseapp.com",
+  projectId: "budgetbite-xxxx",
+  storageBucket: "budgetbite-xxxx.firebasestorage.app",
+  messagingSenderId: "123456789",
+  appId: "1:123456789:web:abc123",
+};
+*/
+const FIREBASE_VERSION = "13.2.0";
+const GUEST_KEY = "budgetbite-guest";
+const cloud = { configured: !!FIREBASE_CONFIG, user: null, fb: null, unsub: [] };
 const DEFAULTS = { budget: 70, entries: [], ocrLang: "nld" };
 let state = { ...DEFAULTS };
 
@@ -305,7 +360,34 @@ function load() {
   } catch (e) { /* no storage: keep data in memory only */ }
 }
 function save() {
+  if (cloud.user) return;   // logged in: your data lives in your account, not in this browser
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+}
+
+/* ---- Every change to your data goes through these 5 functions.
+   They update the screen straight away, then save:
+   - not logged in → in this browser (localStorage)
+   - logged in     → in your account (Firebase), which syncs to your other devices */
+function addEntries(list) {
+  state.entries.push(...list);
+  save(); render();
+  if (cloud.user) list.forEach(e => cloudWrite(e));
+}
+function addEntry(entry) { addEntries([entry]); }
+function deleteEntry(id) {
+  state.entries = state.entries.filter(e => e.id !== id);
+  save(); render();
+  if (cloud.user) cloudDelete(id);
+}
+function clearEntries() {
+  const ids = state.entries.map(e => e.id);
+  state.entries = [];
+  save(); render();
+  if (cloud.user) ids.forEach(id => cloudDelete(id));
+}
+function saveSettings() {
+  save(); render();
+  if (cloud.user) cloudSaveSettings();
 }
 
 /* =========================================================
@@ -542,8 +624,8 @@ function addDemoData() {
     ["takeaway", 14, "Sushi", 4], ["snacks", 1.8, "Vending machine", 1.2], ["snacks", 2.2, "Chocolate", 2.5],
     ["snacks", 1.5, "Crisps", 3.4], ["drinks", 11, "Student bar", 2.8],
   ];
-  demo.forEach(([category, amount, note, daysAgo], i) =>
-    state.entries.push({ id: "demo" + i + now.toString(36), category, amount, note, time: now - daysAgo * day }));
+  const list = demo.map(([category, amount, note, daysAgo], i) =>
+    ({ id: "demo" + i + now.toString(36), category, amount, note, time: now - daysAgo * day }));
 
   // an example scanned receipt, so the "Cheaper alternatives" card has something to show
   const items = [
@@ -551,10 +633,9 @@ function addDemoData() {
     { name: "PRINGLES ORIGINAL", price: 2.49 }, { name: "BARILLA SPAGHETTI", price: 1.89 },
     { name: "MELK HALFVOL", price: 1.09 }, { name: "BANANEN", price: 1.79 }, { name: "KIPFILET", price: 4.50 },
   ];
-  state.entries.push({ id: "demoR" + now.toString(36), category: "groceries", note: "Colruyt", items, receipt: true,
+  list.push({ id: "demoR" + now.toString(36), category: "groceries", note: "Colruyt", items, receipt: true,
     amount: Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100, time: now - 5 * day });
-  save();
-  render();
+  addEntries(list);
 }
 
 // stops people typing HTML into the note field
@@ -859,7 +940,7 @@ document.getElementById("addForm").addEventListener("submit", e => {
   error.textContent = "";
 
   const entry = {
-    id: Date.now().toString(36),
+    id: newId(),
     amount,
     category: selectedCategory,
     note: document.getElementById("note").value.trim(),
@@ -871,20 +952,16 @@ document.getElementById("addForm").addEventListener("submit", e => {
     entry.items = [{ name, brand, quantity, code, image, price: amount }];
     if (!entry.note) entry.note = name;
   }
-  state.entries.push(entry);
-  save();
   document.getElementById("amount").value = "";
   document.getElementById("note").value = "";
   pickProduct(null);
-  render();
+  addEntry(entry);
 });
 
 document.getElementById("recent").addEventListener("click", e => {
   const btn = e.target.closest(".del");
   if (!btn) return;
-  state.entries = state.entries.filter(x => x.id !== btn.dataset.id);
-  save();
-  render();
+  deleteEntry(btn.dataset.id);
 });
 
 /* ---- Receipt scanning buttons ---- */
@@ -984,8 +1061,8 @@ $("scanSave").addEventListener("click", () => {
   const items = readScanItems();
   const amount = Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
   if (amount <= 0) { $("scanError").textContent = "There's nothing to add yet."; return; }
-  state.entries.push({
-    id: Date.now().toString(36),
+  addEntry({
+    id: newId(),
     amount,
     category: $("scanCategory").value,
     note: $("scanStore").value.trim() || "Receipt",
@@ -993,8 +1070,6 @@ $("scanSave").addEventListener("click", () => {
     items: items.map(i => ({ name: i.name || "Product", price: i.price })),
     time: Date.now(),
   });
-  save();
-  render();
   scanOverlay.classList.remove("open");
 });
 scanOverlay.addEventListener("click", e => { if (e.target === scanOverlay) { scanCancelled = true; scanOverlay.classList.remove("open"); } });
@@ -1133,6 +1208,7 @@ const overlay = document.getElementById("overlay");
 document.getElementById("settingsBtn").addEventListener("click", () => {
   document.getElementById("budgetInput").value = state.budget;
   document.getElementById("langSelect").value = state.ocrLang || "nld";
+  renderAccount();
   overlay.classList.add("open");
 });
 overlay.addEventListener("click", e => { if (e.target === overlay) overlay.classList.remove("open"); });
@@ -1140,19 +1216,195 @@ document.getElementById("saveBudget").addEventListener("click", () => {
   const b = parseAmount(document.getElementById("budgetInput").value);
   if (b && b > 0) state.budget = b;
   state.ocrLang = document.getElementById("langSelect").value;
-  save(); render();
+  saveSettings();
   overlay.classList.remove("open");
 });
 // two taps needed, so you don't delete everything by accident
 const clearBtn = document.getElementById("clearData");
 clearBtn.addEventListener("click", () => {
   if (clearBtn.dataset.sure) {
-    state.entries = []; save(); render();
+    clearEntries();
     overlay.classList.remove("open");
     delete clearBtn.dataset.sure; clearBtn.textContent = "Delete all purchases";
   } else {
     clearBtn.dataset.sure = "1"; clearBtn.textContent = "Tap again to delete everything";
   }
+});
+
+/* =========================================================
+   6b. ACCOUNTS & SYNC (Firebase)
+   - Firebase Authentication: email + password accounts
+   - Cloud Firestore: a database. Each user gets
+       users/{their id}            → budget & language
+       users/{their id}/entries/…  → one document per purchase
+   - onSnapshot = "tell me whenever this changes", which is
+     how a purchase added on your phone appears on your laptop
+   ========================================================= */
+const isGuest = () => { try { return localStorage.getItem(GUEST_KEY) === "1"; } catch (e) { return false; } };
+const setGuest = on => { try { on ? localStorage.setItem(GUEST_KEY, "1") : localStorage.removeItem(GUEST_KEY); } catch (e) {} };
+const showAuth = () => { $("authScreen").hidden = false; };
+const hideAuth = () => { $("authScreen").hidden = true; };
+
+async function startCloud() {
+  if (!cloud.configured) return;
+  try {
+    // load Firebase only when accounts are switched on
+    const base = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}/`;
+    const [appM, authM, fsM] = await Promise.all([
+      import(base + "firebase-app.js"), import(base + "firebase-auth.js"), import(base + "firebase-firestore.js"),
+    ]);
+    const app = appM.initializeApp(FIREBASE_CONFIG);
+    let db;
+    try {   // keep a copy on the device, so the app also works offline
+      db = fsM.initializeFirestore(app, { localCache: fsM.persistentLocalCache({ tabManager: fsM.persistentMultipleTabManager() }) });
+    } catch (e) { db = fsM.getFirestore(app); }
+    cloud.fb = { auth: authM.getAuth(app), db, A: authM, F: fsM };
+    authM.onAuthStateChanged(cloud.fb.auth, onUser);
+  } catch (e) {
+    console.warn("Accounts unavailable:", e);
+    cloud.loadError = true;   // e.g. offline the very first time: keep working on this device
+    renderAccount();
+  }
+}
+
+function onUser(user) {
+  cloud.unsub.forEach(stop => stop());
+  cloud.unsub = [];
+  cloud.user = user;
+
+  if (!user) {                       // logged out
+    load(); render(); renderAccount();
+    if (!isGuest()) showAuth();
+    return;
+  }
+
+  hideAuth();
+  setGuest(false);
+  const { F, db } = cloud.fb;
+  const userDoc = F.doc(db, "users", user.uid);
+  const entriesCol = F.collection(db, "users", user.uid, "entries");
+
+  // purchases made on this device before logging in → move them into the account (once)
+  const local = readLocalData();
+  if (local.entries.length) {
+    local.entries.forEach(e => cloudWrite(e));
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...local, entries: [] })); } catch (e) {}
+  }
+
+  state = { ...DEFAULTS, entries: [] };
+  render();
+
+  cloud.unsub.push(F.onSnapshot(userDoc, snap => {
+    if (snap.exists()) {
+      const d = snap.data();
+      if (d.budget) state.budget = d.budget;
+      if (d.ocrLang) state.ocrLang = d.ocrLang;
+    } else {
+      state.budget = local.budget || DEFAULTS.budget;        // first login: start from this device's settings
+      state.ocrLang = local.ocrLang || DEFAULTS.ocrLang;
+      cloudSaveSettings();
+    }
+    render();
+  }, syncError));
+
+  cloud.unsub.push(F.onSnapshot(entriesCol, snap => {
+    state.entries = snap.docs.map(d => d.data());
+    render();
+  }, syncError));
+
+  renderAccount();
+}
+
+function readLocalData() {
+  try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") }; }
+  catch (e) { return { ...DEFAULTS }; }
+}
+
+// Firestore doesn't accept "undefined" values, so we clean them out first
+const plain = obj => JSON.parse(JSON.stringify(obj));
+
+function cloudWrite(entry) {
+  const { F, db } = cloud.fb;
+  F.setDoc(F.doc(db, "users", cloud.user.uid, "entries", entry.id), plain(entry)).catch(syncError);
+}
+function cloudDelete(id) {
+  const { F, db } = cloud.fb;
+  F.deleteDoc(F.doc(db, "users", cloud.user.uid, "entries", id)).catch(syncError);
+}
+function cloudSaveSettings() {
+  const { F, db } = cloud.fb;
+  F.setDoc(F.doc(db, "users", cloud.user.uid), { budget: state.budget, ocrLang: state.ocrLang }, { merge: true }).catch(syncError);
+}
+function syncError(err) {
+  console.warn("Sync problem:", err);
+  cloud.lastError = err.code === "permission-denied"
+    ? "Sync is blocked: check the Firestore security rules (see SETUP.md)."
+    : "Couldn't sync right now. Your changes will be sent when the connection is back.";
+  renderAccount();
+}
+
+function renderAccount() {
+  const row = $("accountRow");
+  if (!cloud.configured) { row.innerHTML = ""; return; }
+  if (cloud.loadError) {
+    row.innerHTML = `<div class="account-row"><div>Accounts unavailable<small>Couldn't load the login service. Check your internet and reopen the app.</small></div></div>`;
+  } else if (cloud.user) {
+    row.innerHTML = `<div class="account-row"><div>👤 ${escapeHtml(cloud.user.email || "")}
+      <small>${cloud.lastError ? "⚠️ " + escapeHtml(cloud.lastError) : "Synced on all your devices"}</small></div>
+      <button type="button" id="logoutBtn">Log out</button></div>`;
+  } else {
+    row.innerHTML = `<div class="account-row"><div>Not logged in<small>Your data is only on this device.</small></div>
+      <button type="button" id="loginOpenBtn">Log in</button></div>`;
+  }
+}
+
+// friendly messages for Firebase's error codes
+function authMessage(err) {
+  return ({
+    "auth/invalid-email": "That doesn't look like a valid email address.",
+    "auth/missing-password": "Enter your password.",
+    "auth/weak-password": "Choose a password of at least 6 characters.",
+    "auth/email-already-in-use": "There's already an account with this email. Try logging in.",
+    "auth/invalid-credential": "Wrong email or password.",
+    "auth/user-not-found": "Wrong email or password.",
+    "auth/wrong-password": "Wrong email or password.",
+    "auth/too-many-requests": "Too many attempts. Wait a few minutes and try again.",
+    "auth/network-request-failed": "No internet connection.",
+  })[err.code] || "Something went wrong. Try again.";
+}
+
+function authFields() {
+  $("authError").textContent = "";
+  $("authOk").textContent = "";
+  return { email: $("authEmail").value.trim(), password: $("authPassword").value };
+}
+async function authAction(fn) {
+  if (!cloud.fb) { $("authError").textContent = "The login service is still loading. Try again in a moment."; return; }
+  try { await fn(cloud.fb.A, cloud.fb.auth); }
+  catch (err) { $("authError").textContent = authMessage(err); }
+}
+
+$("authForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const { email, password } = authFields();
+  authAction((A, auth) => A.signInWithEmailAndPassword(auth, email, password));
+});
+$("signupBtn").addEventListener("click", () => {
+  const { email, password } = authFields();
+  authAction((A, auth) => A.createUserWithEmailAndPassword(auth, email, password));
+});
+$("forgotBtn").addEventListener("click", () => {
+  const { email } = authFields();
+  if (!email) { $("authError").textContent = "Type your email first, then tap “Forgot password?”."; return; }
+  authAction(async (A, auth) => {
+    await A.sendPasswordResetEmail(auth, email);
+    $("authOk").textContent = "If that email has an account, a reset link is on its way. Check your inbox (and spam).";
+  });
+});
+$("guestBtn").addEventListener("click", () => { setGuest(true); hideAuth(); });
+$("accountRow").addEventListener("click", e => {
+  if (e.target.id === "logoutBtn") { setGuest(false); overlay.classList.remove("open"); cloud.fb.A.signOut(cloud.fb.auth); }
+  if (e.target.id === "loginOpenBtn") { overlay.classList.remove("open"); setGuest(false); showAuth(); }
 });
 
 /* =========================================================
@@ -1162,6 +1414,8 @@ load();
 renderChips();
 render();
 showRecent();
+renderAccount();
+startCloud();
 
 /* =========================================================
    8. OFFLINE SUPPORT – start the service worker (sw.js)

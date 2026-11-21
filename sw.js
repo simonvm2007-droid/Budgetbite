@@ -4,7 +4,7 @@
    files on your phone. Change CACHE_NAME (v1 → v2) whenever
    you change an icon, so phones pick up the new version.
    ========================================================= */
-const CACHE_NAME = "budgetbite-v5";
+const CACHE_NAME = "budgetbite-v6";
 const APP_FILES = [
   "./",
   "./index.html",
@@ -36,7 +36,10 @@ self.addEventListener("activate", event => {
 self.addEventListener("fetch", event => {
   const req = event.request;
   if (req.method !== "GET") return;
-  if (req.url.includes("openfoodfacts.org")) return;   // product searches always go to the internet
+  // only keep copies of the app itself and its libraries;
+  // product searches, logins and the database always go to the internet
+  const CACHEABLE = [self.location.origin, "https://www.gstatic.com/firebasejs/", "https://cdn.jsdelivr.net/", "https://fonts.googleapis.com/", "https://fonts.gstatic.com/"];
+  if (!CACHEABLE.some(start => req.url.startsWith(start))) return;
 
   if (req.mode === "navigate") {
     event.respondWith(

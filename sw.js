@@ -4,7 +4,7 @@
    files on your phone. Change CACHE_NAME (v1 → v2) whenever
    you change an icon, so phones pick up the new version.
    ========================================================= */
-const CACHE_NAME = "budgetbite-v1";
+const CACHE_NAME = "budgetbite-v2";
 const APP_FILES = [
   "./",
   "./index.html",
@@ -52,8 +52,11 @@ self.addEventListener("fetch", event => {
 
   event.respondWith(
     caches.match(req).then(cached => cached || fetch(req).then(res => {
-      const copy = res.clone();
-      caches.open(CACHE_NAME).then(c => c.put(req, copy));
+      // only keep good answers (and files from other sites, like the scanner)
+      if (res.ok || res.type === "opaque") {
+        const copy = res.clone();
+        caches.open(CACHE_NAME).then(c => c.put(req, copy));
+      }
       return res;
     }))
   );

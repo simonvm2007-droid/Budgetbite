@@ -102,9 +102,37 @@
   .overlay { position: fixed; inset: 0; background: rgba(20,25,22,.45); display: none; align-items: flex-end; justify-content: center; }
   .overlay.open { display: flex; }
   .sheet { background: var(--card); width: 100%; max-width: 460px; border-radius: 22px 22px 0 0; padding: 22px 18px calc(28px + env(safe-area-inset-bottom)); }
-  .sheet input { width: 100%; font: 700 22px "DM Sans", sans-serif; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; margin: 8px 0 14px; }
+  #budgetInput { width: 100%; font: 700 22px "DM Sans", sans-serif; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; margin: 8px 0 14px; }
 
   footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 18px; }
+
+  /* ---------- 7. RECEIPT SCANNING ---------- */
+  .scan-btn { width: 100%; border: 1.5px dashed var(--accent); background: var(--accent-soft); color: var(--accent); border-radius: 14px; padding: 12px; font-size: 15px; font-weight: 700; margin-bottom: 14px; }
+  .or { text-align: center; color: var(--muted); font-size: 12px; margin: -6px 0 10px; }
+  .sheet.tall { max-height: 88vh; overflow-y: auto; }
+  .progress { height: 10px; background: var(--line); border-radius: 99px; overflow: hidden; margin: 10px 0 6px; }
+  .progress > div { height: 100%; width: 0%; background: var(--accent); transition: width .3s; }
+  .status-text { font-size: 14px; color: var(--muted); }
+  .field-label { font-size: 13px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .text-input, .select { width: 100%; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font: inherit; background: #fff; margin-bottom: 12px; }
+  .item-row { display: grid; grid-template-columns: 26px 1fr 78px; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .item-row input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); }
+  .item-row input[type=text] { border: 1px solid var(--line); border-radius: 10px; padding: 8px; font: inherit; font-size: 14px; width: 100%; background: #fff; }
+  .item-row .item-price { text-align: right; }
+  .sum-line { display: flex; justify-content: space-between; font-size: 14px; margin: 10px 0 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .sum-line b { font-size: 16px; }
+  .hint { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
+  .secondary { width: 100%; margin-top: 8px; background: none; border: 1px solid var(--line); border-radius: 14px; padding: 12px; font-weight: 700; color: var(--ink); }
+  .badge { display: inline-block; font-size: 11px; background: var(--accent-soft); color: var(--accent); border-radius: 99px; padding: 1px 7px; margin-left: 4px; }
+
+  /* ---------- 8. CHEAPER ALTERNATIVES ---------- */
+  .swap { padding: 10px 0; border-top: 1px solid var(--line); font-size: 14px; line-height: 1.45; }
+  .swap:first-of-type { border-top: none; }
+  .swap .from { font-weight: 700; }
+  .swap .from small { font-weight: 400; color: var(--muted); }
+  .swap .to { color: var(--accent); }
+  .swap-total { background: var(--accent-soft); border-radius: 12px; padding: 10px 12px; font-size: 14px; margin-bottom: 8px; }
+  .fine { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
 </style>
 </head>
 <body>
@@ -129,6 +157,9 @@
   <!-- ADD A PURCHASE -->
   <section class="card">
     <h2>Add a purchase</h2>
+    <button type="button" class="scan-btn" id="scanBtn">📷 Scan a receipt</button>
+    <input type="file" id="receiptFile" accept="image/*" hidden>
+    <p class="or">or add it by hand</p>
     <form id="addForm">
       <div class="amount-row">
         <span>€</span>
@@ -145,6 +176,12 @@
   <section class="card tips">
     <h2>Smart tips</h2>
     <div id="tips"></div>
+  </section>
+
+  <!-- CHEAPER ALTERNATIVES (based on the products you buy) -->
+  <section class="card">
+    <h2>Cheaper alternatives</h2>
+    <div id="swaps"></div>
   </section>
 
   <!-- THIS WEEK PER CATEGORY -->
@@ -167,8 +204,43 @@
   <div class="sheet">
     <h2>Weekly budget for food &amp; drinks</h2>
     <input id="budgetInput" type="text" inputmode="decimal">
+    <label class="field-label" for="langSelect">Language of your receipts</label>
+    <select class="select" id="langSelect">
+      <option value="nld">Dutch</option>
+      <option value="fra">French</option>
+      <option value="eng">English</option>
+    </select>
     <button class="primary" id="saveBudget">Save</button>
     <button class="danger" id="clearData">Delete all purchases</button>
+  </div>
+</div>
+
+<!-- Receipt scanning panel -->
+<div class="overlay" id="scanOverlay">
+  <div class="sheet tall">
+    <h2>Scan a receipt</h2>
+
+    <!-- step 1: reading the photo -->
+    <div id="scanStatus">
+      <div class="progress"><div id="scanProgress"></div></div>
+      <div class="status-text" id="scanText">Loading the scanner…</div>
+      <button class="secondary" id="scanCancel">Cancel</button>
+    </div>
+
+    <!-- step 2: check what was found -->
+    <div id="scanReview" hidden>
+      <p class="hint">Check the products and prices. Untick anything that isn't a product, and fix mistakes.</p>
+      <label class="field-label" for="scanStore">Shop</label>
+      <input class="text-input" id="scanStore" type="text" placeholder="e.g. Colruyt">
+      <label class="field-label" for="scanCategory">Category</label>
+      <select class="select" id="scanCategory"></select>
+      <div id="scanItems"></div>
+      <button class="link" id="addLine" type="button">+ Add a line</button>
+      <div class="sum-line"><span id="scanTotalInfo"></span><b id="scanSum">€0.00</b></div>
+      <div class="error" id="scanError"></div>
+      <button class="primary" id="scanSave">Add receipt</button>
+      <button class="secondary" id="scanRetry">Try another photo</button>
+    </div>
   </div>
 </div>
 
@@ -191,12 +263,13 @@ const CATEGORIES = [
    try/catch because some browsers block it.
    ========================================================= */
 const STORAGE_KEY = "budgetbite-v1";
-let state = { budget: 70, entries: [] };   // default values
+const DEFAULTS = { budget: 70, entries: [], ocrLang: "nld" };
+let state = { ...DEFAULTS };
 
 function load() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) state = JSON.parse(saved);
+    if (saved) state = { ...DEFAULTS, ...JSON.parse(saved) };   // fills in new settings for older saves
   } catch (e) { /* no storage: keep data in memory only */ }
 }
 function save() {
@@ -292,7 +365,7 @@ function render() {
         const when = new Date(e.time).toLocaleString("en-GB", { weekday: "short", hour: "2-digit", minute: "2-digit" });
         return `<div class="entry">
           <span class="emoji">${c.emoji}</span>
-          <div class="info">${escapeHtml(e.note || c.label)}<small>${when}</small></div>
+          <div class="info">${escapeHtml(e.note || c.label)}${e.items && e.items.length ? `<span class="badge">🧾 ${e.items.length} items</span>` : ""}<small>${when}</small></div>
           <span class="price">${euro(e.amount)}</span>
           <button class="del" data-id="${e.id}" aria-label="Delete">×</button>
         </div>`;
@@ -300,6 +373,7 @@ function render() {
     : `<p class="empty">No purchases yet.</p>`;
 
   renderTips();
+  renderSwaps();
 }
 
 /* =========================================================
@@ -434,10 +508,19 @@ function addDemoData() {
     ["coffee", 3.2, "Latte at uni", 0.1], ["coffee", 2.8, "Cappuccino", 1], ["coffee", 3.5, "Iced coffee", 2],
     ["coffee", 3.2, "Latte at uni", 3], ["takeaway", 12.5, "Pizza", 0.3], ["takeaway", 9.9, "Kebab", 2.2],
     ["takeaway", 14, "Sushi", 4], ["snacks", 1.8, "Vending machine", 1.2], ["snacks", 2.2, "Chocolate", 2.5],
-    ["snacks", 1.5, "Crisps", 3.4], ["groceries", 18.4, "Weekly shop", 5], ["drinks", 11, "Student bar", 2.8],
+    ["snacks", 1.5, "Crisps", 3.4], ["drinks", 11, "Student bar", 2.8],
   ];
   demo.forEach(([category, amount, note, daysAgo], i) =>
     state.entries.push({ id: "demo" + i + now.toString(36), category, amount, note, time: now - daysAgo * day }));
+
+  // an example scanned receipt, so the "Cheaper alternatives" card has something to show
+  const items = [
+    { name: "COCA COLA 1.5L", price: 2.35 }, { name: "NUTELLA 400G", price: 4.29 },
+    { name: "PRINGLES ORIGINAL", price: 2.49 }, { name: "BARILLA SPAGHETTI", price: 1.89 },
+    { name: "MELK HALFVOL", price: 1.09 }, { name: "BANANEN", price: 1.79 }, { name: "KIPFILET", price: 4.50 },
+  ];
+  state.entries.push({ id: "demoR" + now.toString(36), category: "groceries", note: "Colruyt", items,
+    amount: Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100, time: now - 5 * day });
   save();
   render();
 }
@@ -451,6 +534,186 @@ function escapeHtml(s) {
 function parseAmount(text) {
   const n = parseFloat(String(text).replace(",", ".").trim());
   return isNaN(n) ? null : Math.round(n * 100) / 100;
+}
+
+/* =========================================================
+   5c. CHEAPER ALTERNATIVES – the swap list
+   Each line: [words to look for], what to try instead,
+   and roughly how much cheaper that usually is (0.40 = 40%).
+   These are typical estimates, not live shop prices.
+   Add your own lines to make the app smarter!
+   ========================================================= */
+const SWAPS = [
+  [["coca cola", "coca-cola", "coke", "pepsi"], "store-brand cola", 0.45],
+  [["fanta", "sprite", "7up", "7 up", "schweppes", "orangina"], "store-brand soft drinks", 0.45],
+  [["red bull", "monster", "burn"], "store-brand energy drinks", 0.60],
+  [["lipton", "ice tea", "fuze tea", "fuzetea"], "store-brand iced tea", 0.40],
+  [["tropicana", "minute maid", "innocent", "looza"], "store-brand juice", 0.45],
+  [["spa reine", "spa blauw", "spa rood", "spa intense", "chaudfontaine", "evian", "vittel", "bru"], "tap water in a reusable bottle", 0.95],
+  [["jupiler", "stella", "maes", "leffe", "duvel", "heineken", "hoegaarden", "kronenbourg", "carlsberg"], "store-brand pils or a bigger crate", 0.35],
+  [["nutella"], "store-brand hazelnut spread", 0.35],
+  [["lotus", "biscoff"], "store-brand speculoos", 0.40],
+  [["pringles"], "store-brand stacked crisps", 0.45],
+  [["lays", "lay s", "doritos", "croky", "smiths", "bugles"], "store-brand crisps", 0.40],
+  [["oreo"], "store-brand chocolate cookies", 0.40],
+  [["milka", "cote d or", "kinder", "toblerone", "galler", "mars", "snickers", "twix", "kitkat", "kit kat", "bounty", "m m s"], "store-brand chocolate or a multipack", 0.40],
+  [["barilla", "panzani", "de cecco", "buitoni"], "store-brand pasta", 0.40],
+  [["uncle ben", "uncle bens", "lassie", "taureau aile"], "store-brand rice", 0.45],
+  [["heinz", "hellmann", "hellmanns", "calve", "devos lemmens", "amora"], "store-brand sauces", 0.40],
+  [["knorr", "maggi", "bertolli", "dolmio", "raguletto"], "store-brand pasta sauce or stock", 0.35],
+  [["kellogg", "kelloggs", "special k", "chocapic", "nesquik", "tresor", "golden grahams"], "store-brand cereal", 0.45],
+  [["philadelphia", "boursin", "president", "babybel", "leerdammer", "vache qui rit"], "store-brand cheese", 0.35],
+  [["danone", "activia", "alpro", "danio", "actimel", "yoplait", "muller", "inex", "campina"], "store-brand dairy and yoghurt", 0.35],
+  [["cecemel", "chocomel"], "store-brand chocolate milk", 0.35],
+  [["nespresso", "senseo", "douwe egberts", "jacqmotte", "rombouts", "starbucks", "nescafe"], "store-brand coffee or pads", 0.40],
+  [["ristorante", "dr oetker", "wagner", "buitoni pizza"], "store-brand frozen pizza", 0.45],
+  [["iglo", "findus", "mccain", "aviko"], "store-brand frozen food", 0.35],
+  [["ben jerry", "ben jerrys", "haagen dazs", "magnum", "ola"], "store-brand ice cream", 0.50],
+  [["bonne maman", "materne", "hero"], "store-brand jam", 0.35],
+  [["lu", "prince", "tuc", "cent wafers", "delacre"], "store-brand biscuits", 0.35],
+  [["colgate", "nivea", "dove", "head shoulders", "gillette", "axe", "sanex"], "store-brand toiletries", 0.40],
+];
+
+// makes text easy to compare: "Côte d'Or 200G" → "cote d or 200g"
+function normalize(text) {
+  return " " + String(text).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, " ").trim() + " ";
+}
+// find the swap for one product name (whole words only, so "spa" doesn't match "spaghetti")
+function findSwap(name) {
+  const text = normalize(name);
+  return SWAPS.find(([words]) => words.some(w => text.includes(normalize(w))));
+}
+
+// looks at the last 30 days and finds products with a cheaper alternative
+function getSwaps() {
+  const day = 24 * 3600 * 1000, now = Date.now();
+  const recent = state.entries.filter(e => e.time >= now - 30 * day);
+  if (!recent.length) return [];
+
+  // turn the estimate into "per month", even if you've only used the app a few days
+  const oldest = Math.min(...recent.map(e => e.time));
+  const daysOfData = Math.max(7, Math.min(30, (now - oldest) / day));
+  const toMonth = 30 / daysOfData;
+
+  const found = new Map();
+  recent.forEach(e => {
+    // scanned receipts have products; hand-added purchases only have a note
+    const products = e.items && e.items.length ? e.items : [{ name: e.note || "", price: e.amount }];
+    products.forEach(p => {
+      const swap = findSwap(p.name);
+      if (!swap || p.price <= 0) return;
+      const key = swap[1];
+      const g = found.get(key) || { alternative: swap[1], pct: swap[2], names: new Set(), count: 0, spent: 0 };
+      g.names.add(p.name); g.count++; g.spent += p.price;
+      found.set(key, g);
+    });
+  });
+
+  return [...found.values()]
+    .map(g => ({ ...g, saving: g.spent * g.pct * toMonth }))
+    .sort((a, b) => b.saving - a.saving);
+}
+
+function renderSwaps() {
+  const swaps = getSwaps();
+  const box = document.getElementById("swaps");
+  if (!swaps.length) {
+    box.innerHTML = `<p class="empty">Scan a receipt and BudgetBite will look for cheaper alternatives to the products you buy.</p>`;
+    return;
+  }
+  const total = swaps.reduce((s, g) => s + g.saving, 0);
+  box.innerHTML = `
+    <div class="swap-total">Swapping these could save you about <b>${euro(total)} a month</b>.</div>
+    ${swaps.slice(0, 6).map(g => `
+      <div class="swap">
+        <div class="from">${escapeHtml([...g.names].slice(0, 2).join(", "))}
+          <small>· ${g.count}× · ${euro(g.spent)}</small></div>
+        <div class="to">→ Try ${g.alternative}: usually ≈${Math.round(g.pct * 100)}% cheaper, save ≈ ${euro(g.saving)} / month</div>
+      </div>`).join("")}
+    <p class="fine">Savings are estimates based on typical store-brand prices, not live prices from the shop.</p>`;
+}
+
+/* =========================================================
+   5d. RECEIPT SCANNING
+   1. You pick or take a photo
+   2. We make it black & white with more contrast (easier to read)
+   3. Tesseract.js reads the text – on your phone, nothing is uploaded
+   4. parseReceipt() finds the product lines and prices
+   5. You check the result and save it
+   ========================================================= */
+const TESSERACT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+
+// load the scanner library only when it's needed (it's quite big)
+function loadTesseract() {
+  if (window.Tesseract) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = TESSERACT_URL;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error("Couldn't load the scanner. Check your internet connection."));
+    document.head.appendChild(s);
+  });
+}
+
+// shrink big phone photos and boost contrast
+async function prepareImage(file) {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  await new Promise((ok, fail) => { img.onload = ok; img.onerror = () => fail(new Error("That file isn't a photo we can read.")); img.src = url; });
+  const scale = Math.min(1, 1600 / img.width);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  URL.revokeObjectURL(url);
+
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const px = data.data;
+  for (let i = 0; i < px.length; i += 4) {
+    const grey = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+    const v = Math.max(0, Math.min(255, (grey - 128) * 1.6 + 128));   // more contrast
+    px[i] = px[i + 1] = px[i + 2] = v;
+  }
+  ctx.putImageData(data, 0, 0);
+  return canvas;
+}
+
+// words that mean "this line is not a product"
+const NOT_A_PRODUCT = /\b(btw|tva|vat|bancontact|maestro|visa|mastercard|payconiq|contant|cash|wisselgeld|terug|rendu|change|kaart|carte|card|subtotaal|subtotal|sous total|betaald|paye|aantal|nombre|artikel|artikels|articles|spaarpunten|points|bon|ticket|kassa|caisse|tel|www|merci|bedankt|datum|date)\b/i;
+const TOTAL_LINE = /\b(totaal|total|te betalen|a payer|net a payer)\b/i;
+const STORES = /(colruyt|delhaize|aldi|lidl|carrefour|albert heijn|okay|spar|intermarche|cora|jumbo|match|proxy|bio-planet|crf)/i;
+
+function parseReceipt(text) {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const priceAtEnd = /(-?\d{1,4}[.,]\d{2})\s*[A-Za-z*€]{0,2}\s*$/;
+  const items = [];
+  let total = null;
+
+  const storeLine = lines.slice(0, 6).find(l => STORES.test(l));
+  const store = storeLine ? storeLine.match(STORES)[1] : "";
+
+  for (const line of lines) {
+    const m = line.match(priceAtEnd);
+    if (!m) continue;
+    const price = parseFloat(m[1].replace(",", "."));
+    const plain = normalize(line);
+
+    if (TOTAL_LINE.test(plain) && !/sub|sous/.test(plain)) {
+      if (total === null || price > total) total = price;   // the biggest "total" line is the real total
+      continue;
+    }
+    if (NOT_A_PRODUCT.test(plain)) continue;
+
+    let name = line.slice(0, m.index)
+      .replace(/\d+\s*[xX*]\s*\d+[.,]\d{2}/g, " ")   // remove "2 x 1,20"
+      .replace(/[^\p{L}\p{N}%.,'&\- ]/gu, " ")
+      .replace(/\s+/g, " ").trim();
+    if (!/\p{L}{2,}/u.test(name) || Math.abs(price) > 150) continue;   // needs real letters, e.g. skip "2 x 1,19"
+    items.push({ name, price: Math.round(price * 100) / 100 });
+  }
+  return { items, total, store };
 }
 
 /* =========================================================
@@ -491,6 +754,117 @@ document.getElementById("recent").addEventListener("click", e => {
   render();
 });
 
+/* ---- Receipt scanning buttons ---- */
+const $ = id => document.getElementById(id);
+const scanOverlay = $("scanOverlay");
+let scanCancelled = false;
+
+$("scanCategory").innerHTML = CATEGORIES.map(c => `<option value="${c.id}">${c.emoji} ${c.label}</option>`).join("");
+$("scanBtn").addEventListener("click", () => { $("receiptFile").value = ""; $("receiptFile").click(); });
+$("scanRetry").addEventListener("click", () => { $("receiptFile").value = ""; $("receiptFile").click(); });
+$("scanCancel").addEventListener("click", () => { scanCancelled = true; scanOverlay.classList.remove("open"); });
+
+$("receiptFile").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  scanCancelled = false;
+  showScanStep("status");
+  setProgress(0, "Loading the scanner… (only slow the first time)");
+  scanOverlay.classList.add("open");
+
+  try {
+    await loadTesseract();
+    setProgress(5, "Preparing your photo…");
+    const image = await prepareImage(file);
+
+    const worker = await Tesseract.createWorker(state.ocrLang || "nld", 1, {
+      logger: m => {
+        if (m.status === "recognizing text") setProgress(10 + m.progress * 90, "Reading the receipt… " + Math.round(m.progress * 100) + "%");
+        else if (m.status) setProgress(8, "Getting ready…");
+      },
+    });
+    const { data } = await worker.recognize(image);
+    await worker.terminate();
+    if (scanCancelled) return;
+
+    const result = parseReceipt(data.text);
+    showReview(result);
+  } catch (err) {
+    setProgress(0, "❌ " + (err.message || "Something went wrong. Try again with a sharper photo."));
+  }
+});
+
+function setProgress(pct, text) {
+  $("scanProgress").style.width = pct + "%";
+  $("scanText").textContent = text;
+}
+function showScanStep(step) {
+  $("scanStatus").hidden = step !== "status";
+  $("scanReview").hidden = step !== "review";
+}
+
+function itemRow(item = { name: "", price: "" }) {
+  const price = item.price === "" ? "" : item.price.toFixed(2);
+  return `<div class="item-row">
+    <input type="checkbox" checked aria-label="Include">
+    <input type="text" class="item-name" value="${escapeHtml(item.name)}" placeholder="Product">
+    <input type="text" class="item-price" inputmode="decimal" value="${price}" placeholder="0.00">
+  </div>`;
+}
+
+let scanTotal = null;
+function showReview({ items, total, store }) {
+  scanTotal = total;
+  $("scanStore").value = store ? store[0].toUpperCase() + store.slice(1).toLowerCase() : "";
+  $("scanCategory").value = "groceries";
+  $("scanError").textContent = items.length ? "" : "We couldn't read the products clearly. Add them by hand, or try a sharper photo in good light.";
+  $("scanItems").innerHTML = items.map(itemRow).join("");
+  updateScanSum();
+  showScanStep("review");
+}
+
+// reads the review list back into products
+function readScanItems() {
+  return [...document.querySelectorAll("#scanItems .item-row")]
+    .filter(row => row.querySelector("input[type=checkbox]").checked)
+    .map(row => ({
+      name: row.querySelector(".item-name").value.trim(),
+      price: parseAmount(row.querySelector(".item-price").value),
+    }))
+    .filter(i => i.price !== null && i.price !== 0);
+}
+
+function updateScanSum() {
+  const sum = readScanItems().reduce((s, i) => s + i.price, 0);
+  $("scanSum").textContent = euro(sum);
+  $("scanTotalInfo").textContent = scanTotal !== null
+    ? `Selected · receipt says ${euro(scanTotal)}${Math.abs(scanTotal - sum) > 0.01 ? " ⚠️" : " ✓"}`
+    : "Selected products";
+}
+$("scanItems").addEventListener("input", updateScanSum);
+$("addLine").addEventListener("click", () => {
+  $("scanItems").insertAdjacentHTML("beforeend", itemRow());
+  updateScanSum();
+});
+
+$("scanSave").addEventListener("click", () => {
+  const items = readScanItems();
+  const amount = Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
+  if (amount <= 0) { $("scanError").textContent = "There's nothing to add yet."; return; }
+  state.entries.push({
+    id: Date.now().toString(36),
+    amount,
+    category: $("scanCategory").value,
+    note: $("scanStore").value.trim() || "Receipt",
+    items: items.map(i => ({ name: i.name || "Product", price: i.price })),
+    time: Date.now(),
+  });
+  save();
+  render();
+  scanOverlay.classList.remove("open");
+});
+scanOverlay.addEventListener("click", e => { if (e.target === scanOverlay) { scanCancelled = true; scanOverlay.classList.remove("open"); } });
+
 document.getElementById("tips").addEventListener("click", e => {
   if (e.target.id === "demoBtn") addDemoData();
 });
@@ -499,12 +873,15 @@ document.getElementById("tips").addEventListener("click", e => {
 const overlay = document.getElementById("overlay");
 document.getElementById("settingsBtn").addEventListener("click", () => {
   document.getElementById("budgetInput").value = state.budget;
+  document.getElementById("langSelect").value = state.ocrLang || "nld";
   overlay.classList.add("open");
 });
 overlay.addEventListener("click", e => { if (e.target === overlay) overlay.classList.remove("open"); });
 document.getElementById("saveBudget").addEventListener("click", () => {
   const b = parseAmount(document.getElementById("budgetInput").value);
-  if (b && b > 0) { state.budget = b; save(); render(); }
+  if (b && b > 0) state.budget = b;
+  state.ocrLang = document.getElementById("langSelect").value;
+  save(); render();
   overlay.classList.remove("open");
 });
 // two taps needed, so you don't delete everything by accident

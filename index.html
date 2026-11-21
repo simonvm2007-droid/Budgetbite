@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BudgetBite – student spending coach</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<style>
+  /* ---------- 1. COLOURS & BASICS ---------- */
+  :root {
+    --bg: #f6f1e9;        /* warm paper background */
+    --card: #fffdf9;
+    --ink: #1f2a24;       /* main text */
+    --muted: #6b746e;
+    --accent: #2f7d5b;    /* green = good / under budget */
+    --accent-soft: #e2f0e8;
+    --warn: #c8553d;      /* red = over budget */
+    --warn-soft: #f8e3dd;
+    --line: #e6dfd3;
+    --radius: 18px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "DM Sans", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  .app { max-width: 460px; margin: 0 auto; padding: 20px 16px 40px; }
+
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  h1 { font-family: "DM Serif Display", serif; font-weight: 400; font-size: 30px; margin: 0; }
+  h1 span { color: var(--accent); }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin-bottom: 14px; }
+
+  button { font-family: inherit; cursor: pointer; }
+  .ghost { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; color: var(--ink); font-size: 14px; }
+
+  /* ---------- 2. TODAY CARD ---------- */
+  .today { background: var(--ink); color: #fff; border: none; }
+  .today .label { color: #b9c4bd; font-size: 14px; }
+  .today .big { font-family: "DM Serif Display", serif; font-size: 52px; line-height: 1.1; margin: 4px 0 12px; }
+  .today .big.over { color: #ff9b85; }
+  .bar { height: 10px; background: rgba(255,255,255,.15); border-radius: 99px; overflow: hidden; }
+  .bar > div { height: 100%; background: #7fd3a8; border-radius: 99px; transition: width .4s; }
+  .bar.over > div { background: #ff9b85; }
+  .week-line { display: flex; justify-content: space-between; font-size: 13px; color: #b9c4bd; margin-top: 8px; }
+
+  /* ---------- 3. ADD FORM ---------- */
+  .amount-row { display: flex; align-items: center; gap: 8px; border-bottom: 2px solid var(--ink); margin-bottom: 14px; }
+  .amount-row span { font-size: 28px; font-weight: 700; }
+  .amount-row input { border: none; background: none; font: 700 28px "DM Sans", sans-serif; width: 100%; padding: 6px 0; outline: none; color: var(--ink); }
+  .chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+  .chip { border: 1px solid var(--line); background: #fff; border-radius: 12px; padding: 10px 4px; font-size: 13px; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--ink); }
+  .chip .emoji { font-size: 20px; }
+  .chip.selected { border-color: var(--accent); background: var(--accent-soft); font-weight: 700; }
+  .note { width: 100%; border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px; font: inherit; margin-bottom: 12px; background: #fff; }
+  .primary { width: 100%; border: none; border-radius: 14px; padding: 14px; background: var(--accent); color: #fff; font-size: 16px; font-weight: 700; }
+  .primary:active { transform: scale(.98); }
+  .error { color: var(--warn); font-size: 13px; min-height: 18px; margin: -4px 0 6px; }
+
+  /* ---------- 4. CATEGORY BARS ---------- */
+  .cat-row { display: grid; grid-template-columns: 110px 1fr 58px; align-items: center; gap: 10px; margin-bottom: 9px; font-size: 14px; }
+  .cat-bar { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; }
+  .cat-bar > div { height: 100%; background: var(--accent); border-radius: 99px; }
+  .cat-row .val { text-align: right; font-weight: 700; }
+  .empty { color: var(--muted); font-size: 14px; margin: 0; }
+
+  /* ---------- 5. RECENT LIST ---------- */
+  .entry { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+  .entry:first-child { border-top: none; }
+  .entry .emoji { font-size: 22px; }
+  .entry .info { flex: 1; }
+  .entry .info small { color: var(--muted); display: block; }
+  .entry .price { font-weight: 700; }
+  .entry .del { border: none; background: none; color: var(--muted); font-size: 18px; padding: 4px 8px; }
+
+  .tips { background: var(--accent-soft); border-color: #cfe5d8; }
+  .tips p { margin: 0; font-size: 14px; }
+  .tip { display: flex; gap: 12px; padding: 10px 0; border-top: 1px solid #cfe5d8; font-size: 14px; line-height: 1.45; }
+  .tip:first-child { border-top: none; padding-top: 0; }
+  .tip .icon { font-size: 22px; }
+  .tip b { display: block; margin-bottom: 2px; }
+  .tip .save { display: inline-block; margin-top: 4px; font-weight: 700; color: var(--accent); }
+  .tip.warn b { color: var(--warn); }
+  .link { background: none; border: none; color: var(--accent); font-weight: 700; padding: 0; text-decoration: underline; font-size: 14px; }
+  .danger { width: 100%; margin-top: 10px; background: none; border: 1px solid var(--warn); color: var(--warn); border-radius: 14px; padding: 12px; font-weight: 700; }
+
+  /* ---------- 6. SETTINGS PANEL ---------- */
+  .overlay { position: fixed; inset: 0; background: rgba(20,25,22,.45); display: none; align-items: flex-end; justify-content: center; }
+  .overlay.open { display: flex; }
+  .sheet { background: var(--card); width: 100%; max-width: 460px; border-radius: 22px 22px 0 0; padding: 22px 18px 28px; }
+  .sheet input { width: 100%; font: 700 22px "DM Sans", sans-serif; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; margin: 8px 0 14px; }
+
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 18px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <h1>Budget<span>Bite</span></h1>
+    <button class="ghost" id="settingsBtn">⚙︎ Budget</button>
+  </header>
+
+  <!-- TODAY: how much can I still spend today? -->
+  <section class="card today">
+    <div class="label">Left to spend today</div>
+    <div class="big" id="leftToday">€0.00</div>
+    <div class="bar" id="weekBar"><div style="width:0%"></div></div>
+    <div class="week-line">
+      <span id="weekSpent">€0 spent this week</span>
+      <span id="weekBudget">of €70</span>
+    </div>
+  </section>
+
+  <!-- ADD A PURCHASE -->
+  <section class="card">
+    <h2>Add a purchase</h2>
+    <form id="addForm">
+      <div class="amount-row">
+        <span>€</span>
+        <input id="amount" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off">
+      </div>
+      <div class="chips" id="chips"></div>
+      <input class="note" id="note" type="text" placeholder="Note (optional) – e.g. latte at uni">
+      <div class="error" id="error"></div>
+      <button class="primary" type="submit">Add</button>
+    </form>
+  </section>
+
+  <!-- SMART TIPS (next feature we build together) -->
+  <section class="card tips">
+    <h2>Smart tips</h2>
+    <div id="tips"></div>
+  </section>
+
+  <!-- THIS WEEK PER CATEGORY -->
+  <section class="card">
+    <h2>This week by category</h2>
+    <div id="categories"></div>
+  </section>
+
+  <!-- RECENT PURCHASES -->
+  <section class="card">
+    <h2>Recent</h2>
+    <div id="recent"></div>
+  </section>
+
+  <footer>Your data is saved in this browser only.</footer>
+</div>
+
+<!-- Settings panel (slides up from the bottom) -->
+<div class="overlay" id="overlay">
+  <div class="sheet">
+    <h2>Weekly budget for food &amp; drinks</h2>
+    <input id="budgetInput" type="text" inputmode="decimal">
+    <button class="primary" id="saveBudget">Save</button>
+    <button class="danger" id="clearData">Delete all purchases</button>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   1. CATEGORIES – change or add your own here
+   ========================================================= */
+const CATEGORIES = [
+  { id: "groceries", label: "Groceries",  emoji: "🛒" },
+  { id: "coffee",    label: "Coffee",     emoji: "☕" },
+  { id: "takeaway",  label: "Takeaway",   emoji: "🍔" },
+  { id: "drinks",    label: "Drinks out", emoji: "🍺" },
+  { id: "snacks",    label: "Snacks",     emoji: "🍫" },
+  { id: "canteen",   label: "Canteen",    emoji: "🍽️" },
+];
+
+/* =========================================================
+   2. SAVING & LOADING DATA
+   localStorage keeps data in the browser. We wrap it in
+   try/catch because some browsers block it.
+   ========================================================= */
+const STORAGE_KEY = "budgetbite-v1";
+let state = { budget: 70, entries: [] };   // default values
+
+function load() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) state = JSON.parse(saved);
+  } catch (e) { /* no storage: keep data in memory only */ }
+}
+function save() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+}
+
+/* =========================================================
+   3. DATE HELPERS – the week starts on Monday
+   ========================================================= */
+function startOfDay(d) { const x = new Date(d); x.setHours(0,0,0,0); return x; }
+function startOfWeek(d) {
+  const x = startOfDay(d);
+  const dayIndex = (x.getDay() + 6) % 7;   // Monday = 0 ... Sunday = 6
+  x.setDate(x.getDate() - dayIndex);
+  return x;
+}
+const euro = n => "€" + n.toFixed(2);
+
+/* =========================================================
+   4. THE BUDGET MATHS
+   Daily allowance = (budget − spent before today) ÷ days left
+   So if you overspend on Monday, the rest of the week gets
+   a bit less — and if you save, you get more.
+   ========================================================= */
+function calculate() {
+  const now = new Date();
+  const today = startOfDay(now).getTime();
+  const weekStart = startOfWeek(now).getTime();
+  const dayIndex = (now.getDay() + 6) % 7;
+  const daysLeft = 7 - dayIndex;           // including today
+
+  const weekEntries = state.entries.filter(e => e.time >= weekStart);
+  const spentWeek = weekEntries.reduce((sum, e) => sum + e.amount, 0);
+  const spentToday = weekEntries.filter(e => e.time >= today).reduce((s, e) => s + e.amount, 0);
+  const spentBeforeToday = spentWeek - spentToday;
+
+  const dailyAllowance = (state.budget - spentBeforeToday) / daysLeft;
+  const leftToday = dailyAllowance - spentToday;
+
+  // totals per category for this week
+  const perCategory = {};
+  weekEntries.forEach(e => perCategory[e.category] = (perCategory[e.category] || 0) + e.amount);
+
+  return { spentWeek, leftToday, perCategory };
+}
+
+/* =========================================================
+   5. DRAWING THE SCREEN
+   ========================================================= */
+let selectedCategory = CATEGORIES[0].id;
+
+function renderChips() {
+  document.getElementById("chips").innerHTML = CATEGORIES.map(c => `
+    <button type="button" class="chip ${c.id === selectedCategory ? "selected" : ""}" data-id="${c.id}">
+      <span class="emoji">${c.emoji}</span>${c.label}
+    </button>`).join("");
+}
+
+function render() {
+  const { spentWeek, leftToday, perCategory } = calculate();
+
+  // Today card
+  const big = document.getElementById("leftToday");
+  big.textContent = leftToday < 0 ? "−" + euro(-leftToday) : euro(leftToday);
+  big.classList.toggle("over", leftToday < 0);
+
+  const pct = Math.min(100, (spentWeek / state.budget) * 100);
+  const bar = document.getElementById("weekBar");
+  bar.firstElementChild.style.width = pct + "%";
+  bar.classList.toggle("over", spentWeek > state.budget);
+  document.getElementById("weekSpent").textContent = euro(spentWeek) + " spent this week";
+  document.getElementById("weekBudget").textContent = "of " + euro(state.budget);
+
+  // Category bars (biggest first)
+  const rows = Object.entries(perCategory).sort((a, b) => b[1] - a[1]);
+  const max = rows.length ? rows[0][1] : 1;
+  document.getElementById("categories").innerHTML = rows.length
+    ? rows.map(([id, total]) => {
+        const c = CATEGORIES.find(c => c.id === id) || { label: id, emoji: "•" };
+        return `<div class="cat-row">
+          <span>${c.emoji} ${c.label}</span>
+          <div class="cat-bar"><div style="width:${(total / max) * 100}%"></div></div>
+          <span class="val">${euro(total)}</span>
+        </div>`;
+      }).join("")
+    : `<p class="empty">Nothing yet this week. Add your first purchase above.</p>`;
+
+  // Recent purchases (newest first, max 15)
+  const recent = [...state.entries].sort((a, b) => b.time - a.time).slice(0, 15);
+  document.getElementById("recent").innerHTML = recent.length
+    ? recent.map(e => {
+        const c = CATEGORIES.find(c => c.id === e.category) || { label: e.category, emoji: "•" };
+        const when = new Date(e.time).toLocaleString("en-GB", { weekday: "short", hour: "2-digit", minute: "2-digit" });
+        return `<div class="entry">
+          <span class="emoji">${c.emoji}</span>
+          <div class="info">${escapeHtml(e.note || c.label)}<small>${when}</small></div>
+          <span class="price">${euro(e.amount)}</span>
+          <button class="del" data-id="${e.id}" aria-label="Delete">×</button>
+        </div>`;
+      }).join("")
+    : `<p class="empty">No purchases yet.</p>`;
+
+  renderTips();
+}
+
+/* =========================================================
+   5b. SMART TIPS – the "coach" part of the app
+   Each rule looks at your spending. If the rule matches,
+   it creates a tip with an estimated saving per month.
+   We then show the 3 tips that save the most.
+   ========================================================= */
+const WEEKS_PER_MONTH = 4.3;
+const HOME_COFFEE = 0.30;   // rough cost of a coffee made at home
+const HOME_MEAL = 3.00;     // rough cost of a simple home-cooked meal
+
+function getTips() {
+  const now = Date.now();
+  const last7 = state.entries.filter(e => e.time >= now - 7 * 24 * 3600 * 1000);
+  const total7 = last7.reduce((s, e) => s + e.amount, 0);
+  const tips = [];
+
+  // helper: purchases and total for one category in the last 7 days
+  const cat = id => {
+    const list = last7.filter(e => e.category === id);
+    const sum = list.reduce((s, e) => s + e.amount, 0);
+    return { count: list.length, sum, avg: list.length ? sum / list.length : 0 };
+  };
+
+  if (last7.length < 3) return [];   // not enough data yet
+
+  // RULE 1: are you spending faster than your budget allows?
+  const { spentWeek } = calculate();
+  const daysPassed = ((new Date().getDay() + 6) % 7) + 1;   // Mon = 1 ... Sun = 7
+  const expected = state.budget * daysPassed / 7;
+  if (spentWeek > expected + 1) {
+    tips.push({
+      icon: "⚠️", warn: true, saving: 999,   // always show this one first
+      title: `You're ${euro(spentWeek - expected)} ahead of your budget pace`,
+      text: `By today you'd ideally have spent about ${euro(expected)}. Try a cheap day tomorrow: cook at home and skip the extras.`,
+    });
+  }
+
+  // RULE 2: coffee habit
+  const coffee = cat("coffee");
+  if (coffee.count >= 3) {
+    const saving = (coffee.avg - HOME_COFFEE) * 3 * WEEKS_PER_MONTH;
+    tips.push({
+      icon: "☕", saving,
+      title: `${coffee.count} coffees this week (${euro(coffee.sum)})`,
+      text: `Bringing a thermos from home 3 days a week instead of buying one at ${euro(coffee.avg)}.`,
+    });
+  }
+
+  // RULE 3: lots of takeaway
+  const take = cat("takeaway");
+  if (take.count >= 2 && take.sum / total7 > 0.25) {
+    const swaps = Math.ceil(take.count / 2);
+    const saving = Math.max(0, take.avg - HOME_MEAL) * swaps * WEEKS_PER_MONTH;
+    tips.push({
+      icon: "🍳", saving,
+      title: `Takeaway is ${Math.round(take.sum / total7 * 100)}% of your spending`,
+      text: `Cook one big pot (pasta, curry, chili) on Sunday and swap ${swaps} takeaway meal${swaps > 1 ? "s" : ""} a week for leftovers.`,
+    });
+  }
+
+  // RULE 4: many small snack purchases
+  const snacks = cat("snacks");
+  if (snacks.count >= 3) {
+    const saving = snacks.sum * 0.4 * WEEKS_PER_MONTH;   // supermarket multipacks ≈ 40% cheaper
+    tips.push({
+      icon: "🍫", saving,
+      title: `${snacks.count} snack buys this week`,
+      text: `Buying a multipack at the supermarket instead of single snacks at shops or vending machines.`,
+    });
+  }
+
+  // RULE 5: nights out
+  const drinks = cat("drinks");
+  if (drinks.count >= 2 && drinks.sum / total7 > 0.3) {
+    const saving = drinks.sum * 0.3 * WEEKS_PER_MONTH;
+    tips.push({
+      icon: "🍺", saving,
+      title: `Going out is ${Math.round(drinks.sum / total7 * 100)}% of your spending`,
+      text: `Decide a fixed amount before you go out, look for student nights, and alternate with water.`,
+    });
+  }
+
+  // RULE 6: canteen used a lot – sometimes bring lunch
+  const canteen = cat("canteen");
+  if (canteen.count >= 4) {
+    const saving = Math.max(0, canteen.avg - HOME_MEAL) * 2 * WEEKS_PER_MONTH;
+    tips.push({
+      icon: "🥪", saving,
+      title: `${canteen.count} canteen meals this week`,
+      text: `Bringing a packed lunch 2 days a week.`,
+    });
+  }
+
+  // RULE 7: good news – under budget
+  if (spentWeek < expected - 1) {
+    const yearly = (expected - spentWeek) / daysPassed * 365;
+    tips.push({
+      icon: "🎉", saving: -1,   // show after the saving tips
+      title: `Nice! You're ${euro(expected - spentWeek)} under your budget pace`,
+      text: `If you keep this up, you'd save about ${euro(yearly)} a year.`,
+    });
+  }
+
+  // biggest saving first, keep the top 3
+  return tips.sort((a, b) => b.saving - a.saving).slice(0, 3);
+}
+
+function renderTips() {
+  const tips = getTips();
+  const box = document.getElementById("tips");
+  if (!tips.length) {
+    box.innerHTML = `<p>Add at least 3 purchases and your coach will start spotting habits.
+      <button class="link" id="demoBtn">Try it with example data</button></p>`;
+    return;
+  }
+  box.innerHTML = tips.map(t => `
+    <div class="tip ${t.warn ? "warn" : ""}">
+      <span class="icon">${t.icon}</span>
+      <div>
+        <b>${t.title}</b>${t.text}
+        ${t.saving > 0 && t.saving < 999 ? `<span class="save">Could save ≈ ${euro(t.saving)} / month</span>` : ""}
+      </div>
+    </div>`).join("");
+}
+
+/* Example data so you (or a recruiter!) can see the tips straight away */
+function addDemoData() {
+  const day = 24 * 3600 * 1000, now = Date.now();
+  const demo = [
+    ["coffee", 3.2, "Latte at uni", 0.1], ["coffee", 2.8, "Cappuccino", 1], ["coffee", 3.5, "Iced coffee", 2],
+    ["coffee", 3.2, "Latte at uni", 3], ["takeaway", 12.5, "Pizza", 0.3], ["takeaway", 9.9, "Kebab", 2.2],
+    ["takeaway", 14, "Sushi", 4], ["snacks", 1.8, "Vending machine", 1.2], ["snacks", 2.2, "Chocolate", 2.5],
+    ["snacks", 1.5, "Crisps", 3.4], ["groceries", 18.4, "Weekly shop", 5], ["drinks", 11, "Student bar", 2.8],
+  ];
+  demo.forEach(([category, amount, note, daysAgo], i) =>
+    state.entries.push({ id: "demo" + i + now.toString(36), category, amount, note, time: now - daysAgo * day }));
+  save();
+  render();
+}
+
+// stops people typing HTML into the note field
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
+}
+
+// accepts "3,50" (Belgian style) and "3.50"
+function parseAmount(text) {
+  const n = parseFloat(String(text).replace(",", ".").trim());
+  return isNaN(n) ? null : Math.round(n * 100) / 100;
+}
+
+/* =========================================================
+   6. BUTTONS & EVENTS
+   ========================================================= */
+document.getElementById("chips").addEventListener("click", e => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  selectedCategory = chip.dataset.id;
+  renderChips();
+});
+
+document.getElementById("addForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const amount = parseAmount(document.getElementById("amount").value);
+  const error = document.getElementById("error");
+  if (amount === null || amount <= 0) { error.textContent = "Enter an amount, e.g. 3.50"; return; }
+  error.textContent = "";
+
+  state.entries.push({
+    id: Date.now().toString(36),
+    amount,
+    category: selectedCategory,
+    note: document.getElementById("note").value.trim(),
+    time: Date.now(),
+  });
+  save();
+  document.getElementById("amount").value = "";
+  document.getElementById("note").value = "";
+  render();
+});
+
+document.getElementById("recent").addEventListener("click", e => {
+  const btn = e.target.closest(".del");
+  if (!btn) return;
+  state.entries = state.entries.filter(x => x.id !== btn.dataset.id);
+  save();
+  render();
+});
+
+document.getElementById("tips").addEventListener("click", e => {
+  if (e.target.id === "demoBtn") addDemoData();
+});
+
+// Settings panel
+const overlay = document.getElementById("overlay");
+document.getElementById("settingsBtn").addEventListener("click", () => {
+  document.getElementById("budgetInput").value = state.budget;
+  overlay.classList.add("open");
+});
+overlay.addEventListener("click", e => { if (e.target === overlay) overlay.classList.remove("open"); });
+document.getElementById("saveBudget").addEventListener("click", () => {
+  const b = parseAmount(document.getElementById("budgetInput").value);
+  if (b && b > 0) { state.budget = b; save(); render(); }
+  overlay.classList.remove("open");
+});
+// two taps needed, so you don't delete everything by accident
+const clearBtn = document.getElementById("clearData");
+clearBtn.addEventListener("click", () => {
+  if (clearBtn.dataset.sure) {
+    state.entries = []; save(); render();
+    overlay.classList.remove("open");
+    delete clearBtn.dataset.sure; clearBtn.textContent = "Delete all purchases";
+  } else {
+    clearBtn.dataset.sure = "1"; clearBtn.textContent = "Tap again to delete everything";
+  }
+});
+
+/* =========================================================
+   7. START THE APP
+   ========================================================= */
+load();
+renderChips();
+render();
+</script>
+</body>
+</html>

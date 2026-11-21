@@ -4,7 +4,7 @@
    files on your phone. Change CACHE_NAME (v1 → v2) whenever
    you change an icon, so phones pick up the new version.
    ========================================================= */
-const CACHE_NAME = "budgetbite-v4";
+const CACHE_NAME = "budgetbite-v5";
 const APP_FILES = [
   "./",
   "./index.html",

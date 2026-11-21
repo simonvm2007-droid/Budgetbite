@@ -227,7 +227,7 @@
     <div id="recent"></div>
   </section>
 
-  <footer>Your data is saved in this browser only.<br>
+  <footer>BudgetBite v1.5 · Your data is saved in this browser only.<br>
     Product names and photos from <a href="https://world.openfoodfacts.org" style="color:inherit">Open Food Facts</a> (Open Database License, photos CC BY-SA).</footer>
 </div>
 
@@ -763,7 +763,7 @@ let pickedProduct = null;        // the product you tapped
 function buildSearchUrl(query, belgiumOnly) {
   const p = new URLSearchParams({
     search_terms: query, search_simple: "1", action: "process", json: "1",
-    page_size: "15", sort_by: "unique_scans_n", fields: OFF_FIELDS,
+    page_size: "24", sort_by: "unique_scans_n", fields: OFF_FIELDS,
   });
   if (belgiumOnly) { p.set("tagtype_0", "countries"); p.set("tag_contains_0", "contains"); p.set("tag_0", "belgium"); }
   return OFF_URL + "?" + p.toString();
@@ -806,8 +806,10 @@ async function searchProducts(query) {
   const now = Date.now();
   searchTimes = searchTimes.filter(t => now - t < 60000);
   if (searchTimes.length >= 8) {
-    const wait = Math.ceil((60000 - (now - searchTimes[0])) / 1000);
-    throw new Error(`Searching is limited to a few times per minute. Try again in ${wait} seconds, or pick a recent product.`);
+    const waitMs = 60000 - (now - searchTimes[0]) + 200;
+    const err = new Error(`Searching is limited to a few times per minute. Try again in ${Math.ceil(waitMs / 1000)} seconds, or pick a recent product.`);
+    err.waitMs = waitMs;
+    throw err;
   }
 
   const get = async belgiumOnly => {
@@ -1037,24 +1039,85 @@ function pickProduct(p) {
   }
 }
 
-async function runSearch() {
+/* Automatic suggestions while you type.
+   To respect the "10 searches per minute" rule we:
+   1. wait until you stop typing for a moment (0.6 s)
+   2. only ask the database from 3 letters on
+   3. reuse earlier results: if we already searched "nut",
+      typing "nute" just filters those results – no new search */
+let typingTimer = null;
+let retryTimer = null;
+let latestQuery = "";
+
+function words(text) { return normalize(text).trim().split(" ").filter(Boolean); }
+
+// products matching every word you typed
+function filterProducts(list, query) {
+  const want = words(query);
+  return list.filter(p => { const text = normalize(p.name + " " + p.brand); return want.every(w => text.includes(w)); });
+}
+
+// try to answer from earlier searches, without asking the database
+function fromCache(query) {
+  const q = normalize(query).trim();
+  let best = null;
+  for (const [key, results] of searchCache) {
+    const k = key.trim();
+    if (q.startsWith(k) && (!best || k.length > best.key.length)) best = { key: k, results };
+  }
+  if (!best) return null;
+  if (best.key === q) return best.results;              // exactly this search before
+  const filtered = filterProducts(best.results, query);
+  return filtered.length >= 3 ? filtered : null;
+}
+
+async function runSearch({ auto = false } = {}) {
   const q = $("productSearch").value;
+  clearTimeout(retryTimer);
+  clearTimeout(typingTimer);
   if (!q.trim()) { showRecent(); return; }
-  showResults([], "Searching…");
+  latestQuery = q;
+
+  const cached = fromCache(q);
+  if (cached) { showResults(cached); return; }
+
+  if (!auto || !$("productResults").querySelector(".results")) showResults([], "Searching…");
   try {
-    showResults(await searchProducts(q));
+    const results = await searchProducts(q);
+    if (q === latestQuery) showResults(results);          // ignore answers to old searches
   } catch (err) {
+    if (q !== latestQuery) return;
+    if (err.waitMs) {
+      // too many searches: quietly try again when it's allowed
+      showResults([], `Waiting a few seconds before searching (the database allows only a few searches per minute)…`);
+      retryTimer = setTimeout(() => { if ($("productSearch").value === q) runSearch({ auto: true }); }, err.waitMs);
+      return;
+    }
     showResults([], navigator.onLine === false
       ? "You're offline. Pick a recent product, or type a note below."
       : (err.message && !err.message.includes("fetch") ? err.message : "Couldn't reach the product database. Check your internet."));
   }
 }
 
+function onTyping() {
+  const q = $("productSearch").value;
+  clearTimeout(typingTimer);
+  if (!q.trim()) { showRecent(); return; }
+
+  // instant: recent products that match
+  const recent = filterProducts(recentProducts(), q);
+  const cached = fromCache(q);
+  if (cached) { showResults(cached); return; }
+  if (recent.length && !$("productResults").querySelector(".results")) showResults(recent);
+
+  if (q.trim().length >= 3) typingTimer = setTimeout(() => runSearch({ auto: true }), 600);
+}
+
 $("productSearchBtn").addEventListener("click", runSearch);
 $("productSearch").addEventListener("keydown", e => {
   if (e.key === "Enter") { e.preventDefault(); runSearch(); }   // don't submit the whole form
 });
-$("productSearch").addEventListener("input", e => { if (!e.target.value) showRecent(); });
+$("productSearch").addEventListener("input", onTyping);
 $("productResults").addEventListener("click", e => {
   const btn = e.target.closest("[data-i]");
   if (btn) pickProduct(shownResults[+btn.dataset.i]);

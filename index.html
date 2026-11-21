@@ -2,8 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>BudgetBite – student spending coach</title>
+<!-- Makes it installable as an app (PWA) -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1f2a24">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="BudgetBite">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
 <style>
@@ -27,7 +36,7 @@
     background: var(--bg);
     color: var(--ink);
   }
-  .app { max-width: 460px; margin: 0 auto; padding: 20px 16px 40px; }
+  .app { max-width: 460px; margin: 0 auto; padding: calc(20px + env(safe-area-inset-top)) 16px calc(40px + env(safe-area-inset-bottom)); }
 
   header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
   h1 { font-family: "DM Serif Display", serif; font-weight: 400; font-size: 30px; margin: 0; }
@@ -92,7 +101,7 @@
   /* ---------- 6. SETTINGS PANEL ---------- */
   .overlay { position: fixed; inset: 0; background: rgba(20,25,22,.45); display: none; align-items: flex-end; justify-content: center; }
   .overlay.open { display: flex; }
-  .sheet { background: var(--card); width: 100%; max-width: 460px; border-radius: 22px 22px 0 0; padding: 22px 18px 28px; }
+  .sheet { background: var(--card); width: 100%; max-width: 460px; border-radius: 22px 22px 0 0; padding: 22px 18px calc(28px + env(safe-area-inset-bottom)); }
   .sheet input { width: 100%; font: 700 22px "DM Sans", sans-serif; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; margin: 8px 0 14px; }
 
   footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 18px; }
@@ -516,6 +525,15 @@ clearBtn.addEventListener("click", () => {
 load();
 renderChips();
 render();
+
+/* =========================================================
+   8. OFFLINE SUPPORT – start the service worker (sw.js)
+   ========================================================= */
+if ("serviceWorker" in navigator) {
+  try {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  } catch (e) { /* not allowed here (e.g. inside a preview) */ }
+}
 </script>
 </body>
 </html>

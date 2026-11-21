@@ -28,4 +28,4 @@ The smart tips come from a small rule engine written in JavaScript. Each rule ch
 - [ ] Receipt scanning (text recognition from a photo)
 - [ ] Barcode scanning with the Open Food Facts database
 - [ ] Monthly comparison and saving streaks
-- [ ] Install on your phone as an app (PWA)
+- [x] Install on your phone as an app (PWA)

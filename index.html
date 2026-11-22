@@ -241,7 +241,7 @@
     <div id="recent"></div>
   </section>
 
-  <footer>BudgetBite v1.6 · Your data is saved in this browser only.<br>
+  <footer>BudgetBite v1.7 · Your data is saved in this browser only.<br>
     Product names and photos from <a href="https://world.openfoodfacts.org" style="color:inherit">Open Food Facts</a> (Open Database License, photos CC BY-SA).</footer>
 </div>
 
@@ -846,7 +846,13 @@ function parseReceipt(text) {
    ========================================================= */
 const OFF_URL = "https://world.openfoodfacts.org/cgi/search.pl";
 const OFF_FIELDS = "code,product_name,product_name_nl,product_name_fr,product_name_en,brands,quantity,categories_tags,image_front_small_url,image_small_url";
-const searchCache = new Map();   // query → results, so the same search costs nothing
+// query → results, so the same search costs nothing. Kept in the browser
+// between visits too (last 40 searches), so common products load instantly.
+const SEARCH_CACHE_KEY = "budgetbite-searches";
+const searchCache = new Map((() => { try { return JSON.parse(localStorage.getItem(SEARCH_CACHE_KEY) || "[]"); } catch (e) { return []; } })());
+function saveSearchCache() {
+  try { localStorage.setItem(SEARCH_CACHE_KEY, JSON.stringify([...searchCache].slice(-40))); } catch (e) {}
+}
 let searchTimes = [];            // when we searched, to stay under the limit
 let pickedProduct = null;        // the product you tapped
 
@@ -902,17 +908,38 @@ async function searchProducts(query) {
     throw err;
   }
 
-  const get = async belgiumOnly => {
+  // one request, with a time limit (the database can be slow at busy moments)
+  const request = async belgiumOnly => {
     searchTimes.push(Date.now());
-    const res = await fetch(buildSearchUrl(query, belgiumOnly));
-    if (res.status === 429) throw new Error("Too many searches. Wait a minute and try again.");
-    if (!res.ok) throw new Error("The product database didn't answer. Try again later.");
-    return cleanProducts((await res.json()).products);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    try {
+      const res = await fetch(buildSearchUrl(query, belgiumOnly), { signal: controller.signal });
+      if (res.status === 429) { const e = new Error("Too many searches. Wait a minute and try again."); e.waitMs = 60000; throw e; }
+      if (!res.ok) { const e = new Error("The product database is busy right now. Try again in a moment."); e.retry = true; throw e; }
+      return cleanProducts((await res.json()).products);
+    } catch (err) {
+      if (err.name === "AbortError") { const e = new Error("The product database is slow right now. Try again in a moment."); e.retry = true; throw e; }
+      if (err instanceof TypeError) err.retry = true;      // network hiccup
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  // if it fails because of a hiccup, wait a moment and try once more
+  const get = async belgiumOnly => {
+    try { return await request(belgiumOnly); }
+    catch (err) {
+      if (!err.retry || searchTimes.filter(t => Date.now() - t < 60000).length >= 8) throw err;
+      await new Promise(ok => setTimeout(ok, 1500));
+      return await request(belgiumOnly);
+    }
   };
 
   let results = await get(true);                         // Belgian products first
   if (!results.length) results = await get(false);       // nothing? search the whole world
   searchCache.set(key, results);
+  saveSearchCache();
   return results;
 }
 
